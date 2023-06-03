@@ -13,6 +13,10 @@ import os
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
+physical_devices = tf.config.list_physical_devices('GPU')
+for device in physical_devices:
+    tf.config.experimental.set_memory_growth(device, True)
+
 
 import argparse
 
@@ -27,10 +31,6 @@ from trainer import Trainer
 
 MAX_PROMPT_LENGTH = 77
 CKPT_PREFIX = "ckpt"
-
-physical_devices = tf.config.list_physical_devices('GPU')
-for device in physical_devices:
-    tf.config.experimental.set_memory_growth(device, True)
 
 
 def parse_args():
