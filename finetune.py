@@ -80,41 +80,45 @@ def run(args):
     training_dataset = data_utils.prepare_dataset()
 
     print("Initializing trainer...")
-    ckpt_path = (
-        CKPT_PREFIX
-        + f"_epochs_{args.num_epochs}"
-        + f"_res_{args.img_height}"
-        + f"_mp_{args.mp}"
-        + ".h5"
-    )
-    image_encoder = ImageEncoder(args.img_height, args.img_width)
-    diffusion_ft_trainer = Trainer(
-        diffusion_model=DiffusionModel(
-            args.img_height, args.img_width, MAX_PROMPT_LENGTH
-        ),
-        # Remove the top layer from the encoder, which cuts off the variance and only returns
-        # the mean
-        vae=tf.keras.Model(
-            image_encoder.input,
-            image_encoder.layers[-2].output,
-        ),
-        noise_scheduler=NoiseScheduler(),
-        pretrained_ckpt=args.pretrained_ckpt,
-        mp=args.mp,
-        ema=args.ema,
-        max_grad_norm=args.max_grad_norm,
-    )
+    
+    strategy = tf.distribute.MirroredStrategy()
+    
+    with strategy.scope():
+        ckpt_path = (
+            CKPT_PREFIX
+            + f"_epochs_{args.num_epochs}"
+            + f"_res_{args.img_height}"
+            + f"_mp_{args.mp}"
+            + ".h5"
+        )
+        image_encoder = ImageEncoder(args.img_height, args.img_width)
+        diffusion_ft_trainer = Trainer(
+            diffusion_model=DiffusionModel(
+                args.img_height, args.img_width, MAX_PROMPT_LENGTH
+            ),
+            # Remove the top layer from the encoder, which cuts off the variance and only returns
+            # the mean
+            vae=tf.keras.Model(
+                image_encoder.input,
+                image_encoder.layers[-2].output,
+            ),
+            noise_scheduler=NoiseScheduler(),
+            pretrained_ckpt=args.pretrained_ckpt,
+            mp=args.mp,
+            ema=args.ema,
+            max_grad_norm=args.max_grad_norm,
+        )
 
-    print("Initializing optimizer...")
-    optimizer = tf.keras.optimizers.experimental.AdamW(
-        learning_rate=args.lr,
-        weight_decay=args.wd,
-        beta_1=args.beta_1,
-        beta_2=args.beta_2,
-        epsilon=args.epsilon,
-    )
-    if args.mp:
-        optimizer = mixed_precision.LossScaleOptimizer(optimizer)
+        print("Initializing optimizer...")
+        optimizer = tf.keras.optimizers.experimental.AdamW(
+            learning_rate=args.lr,
+            weight_decay=args.wd,
+            beta_1=args.beta_1,
+            beta_2=args.beta_2,
+            epsilon=args.epsilon,
+        )
+        if args.mp:
+            optimizer = mixed_precision.LossScaleOptimizer(optimizer)
 
     print("Compiling trainer...")
     diffusion_ft_trainer.compile(optimizer=optimizer, loss="mse")
