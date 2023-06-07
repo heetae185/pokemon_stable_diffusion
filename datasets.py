@@ -45,14 +45,16 @@ class DatasetUtils:
         if dataset_archive is None:
             dataset_archive = DEFAULT_DATA_ARCHIVE
 
-        data_path = tf.keras.utils.get_file(
-            origin=DEFAULT_DATA_ARCHIVE,
-            untar=True,
-        )
+        # data_path = tf.keras.utils.get_file(
+        #     origin=DEFAULT_DATA_ARCHIVE,
+        #     untar=True,
+        # )
+        data_path = './data/description'
+        image_path = './data/images'
 
-        self.data_frame = pd.read_csv(os.path.join(data_path, "data.csv"))
+        self.data_frame = pd.read_csv(os.path.join(data_path, "image_caption.csv"))
         self.data_frame["image_path"] = self.data_frame["image_path"].apply(
-            lambda x: os.path.join(data_path, x)
+            lambda x: os.path.join(image_path, x)
         )
 
     def process_text(self, caption: str) -> np.ndarray:
