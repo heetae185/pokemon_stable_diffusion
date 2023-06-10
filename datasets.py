@@ -16,7 +16,6 @@ PADDING_TOKEN = 49407
 MAX_PROMPT_LENGTH = 77
 AUTO = tf.data.AUTOTUNE
 POS_IDS = tf.convert_to_tensor([list(range(MAX_PROMPT_LENGTH))], dtype=tf.int32)
-DEFAULT_DATA_ARCHIVE = "https://huggingface.co/datasets/sayakpaul/pokemon-blip-original-version/resolve/main/pokemon_dataset.tar.gz"
 AUTO = tf.data.AUTOTUNE
 
 
@@ -42,26 +41,23 @@ class DatasetUtils:
         self.img_height = img_height
         self.img_width = img_width
 
-        if dataset_archive is None:
-            dataset_archive = DEFAULT_DATA_ARCHIVE
-
-        # data_path = tf.keras.utils.get_file(
-        #     origin=DEFAULT_DATA_ARCHIVE,
-        #     untar=True,
-        # )
+        # 데이터셋 경로 설정
         data_path = './data/description'
         image_path = './data/images'
 
+        # dataframe으로 된 데이터셋으로부터 이미지와 텍스트 받아오기
         self.data_frame = pd.read_csv(os.path.join(data_path, "image_caption.csv"))
         self.data_frame["image_path"] = self.data_frame["image_path"].apply(
             lambda x: os.path.join(image_path, x)
         )
 
+    # keras_cv 토크나이저로 텍스트 임베딩
     def process_text(self, caption: str) -> np.ndarray:
         tokens = self.tokenizer.encode(caption)
         tokens = tokens + [PADDING_TOKEN] * (MAX_PROMPT_LENGTH - len(tokens))
         return np.array(tokens)
 
+    # 이미지와 리사이징
     def process_image(
         self, image_path: tf.Tensor, tokenized_text: tf.Tensor
     ) -> Tuple[tf.Tensor, tf.Tensor]:
@@ -70,21 +66,23 @@ class DatasetUtils:
         image = tf.image.resize(image, (self.img_height, self.img_width))
         return image, tokenized_text
 
+    # 이미지 데이터 증강
     def apply_augmentation(
         self, image_batch: tf.Tensor, token_batch: tf.Tensor
     ) -> Tuple[tf.Tensor, tf.Tensor]:
         return self.augmenter(image_batch), token_batch
 
+    # 이미지 배치와 토큰 배치를 그대로 반환하면서 텍스트를 인코딩된 벡터로 반환
     def run_text_encoder(
         self, image_batch: tf.Tensor, token_batch: tf.Tensor
     ) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
-        # Since the text encoder will remain frozen we can precompute it.
         return (
             image_batch,
             token_batch,
             self.text_encoder([token_batch, POS_IDS], training=False),
         )
 
+    # 데이터를 딕셔너리 형태로 변환
     def prepare_dict(
         self,
         image_batch: tf.Tensor,
@@ -97,6 +95,7 @@ class DatasetUtils:
             "encoded_text": encoded_text_batch,
         }
 
+    # 위의 함수들을 사용하여 텍스트와 이미지를 tf.data.Dataset 객체에 맞게 변환
     def prepare_dataset(self) -> tf.data.Dataset:
         all_captions = list(self.data_frame["caption"].values)
         tokenized_texts = np.empty((len(self.data_frame), MAX_PROMPT_LENGTH))

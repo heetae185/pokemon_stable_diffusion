@@ -31,9 +31,11 @@ class Trainer(tf.keras.Model):
         self.vae = vae
         self.noise_scheduler = noise_scheduler
 
+        # Exponential moving average 설정이 0보다 클 때 ema_diffusion_model 사용
         if ema > 0.0:
             self.ema = tf.Variable(ema, dtype="float32")
             self.optimization_step = tf.Variable(0, dtype="int32")
+            # 기존의 방법이 에러를 유발하여 clone_model로 변경, diffusion model 복사 후 불러옴
             self.ema_diffusion_model = keras.models.clone_model(self.diffusion_model)
             self.do_ema = True
         else:
@@ -49,32 +51,30 @@ class Trainer(tf.keras.Model):
         bsz = tf.shape(images)[0]
 
         with tf.GradientTape() as tape:
-            # Project image into the latent space.
+            # 이미지를 latent space에 투영
             latents = self.sample_from_encoder_outputs(self.vae(images, training=False))
             latents = latents * 0.18215
 
-            # Sample noise that we'll add to the latents
+            # Latent space에 noise 추가
             noise = tf.random.normal(tf.shape(latents))
 
-            # Sample a random timestep for each image
+            # 각 이미지 별 랜덤 타임스텝 추가
             timesteps = tnp.random.randint(
                 0, self.noise_scheduler.train_timesteps, (bsz,)
             )
 
-            # Add noise to the latents according to the noise magnitude at each timestep
-            # (this is the forward diffusion process)
+            # 각 timestep에서 latents에 노이즈 추가
             noisy_latents = self.noise_scheduler.add_noise(
                 tf.cast(latents, noise.dtype), noise, timesteps
             )
 
-            # Get the target for loss depending on the prediction type
-            # just the sampled noise for now.
-            target = noise  # noise_schedule.predict_epsilon == True
+            # 예측 유형에 따라 target 가져오기
+            target = noise  
 
             # Can be implemented:
             # https://github.com/huggingface/diffusers/blob/9be94d9c6659f7a0a804874f445291e3a84d61d4/src/diffusers/schedulers/scheduling_ddpm.py#L352
 
-            # Predict the noise residual and compute loss
+            # noise 잔차 예측 후 loss 계산
             timestep_embeddings = tf.map_fn(
                 lambda t: self.get_timestep_embedding(t), timesteps, dtype=tf.float32
             )
@@ -86,21 +86,25 @@ class Trainer(tf.keras.Model):
             if self.mp:
                 loss = self.optimizer.get_scaled_loss(loss)
 
-        # Update parameters of the diffusion model.
+        # 디퓨전 모델 파라미터 업데이트
         trainable_vars = self.diffusion_model.trainable_variables
         gradients = tape.gradient(loss, trainable_vars)
+        # mixed precision일 경우 unscaled gradients 가져옴
         if self.mp:
             gradients = self.optimizer.get_unscaled_gradients(gradients)
+        # grad_norm 0보다 클 경우 기울기 max_grad_norm으로 클리핑
         if self.max_grad_norm > 0.0:
             gradients = [tf.clip_by_norm(g, self.max_grad_norm) for g in gradients]
+        # 가중치 업데이트
         self.optimizer.apply_gradients(zip(gradients, trainable_vars))
 
-        # EMA.
+        # EMA 관련
         if self.do_ema:
             self.ema_step()
 
         return {m.name: m.result() for m in self.metrics}
 
+    # 주어진 timestep에 대한 임베딩을 생성하여 반환
     def get_timestep_embedding(self, timestep, dim=320, max_period=10000):
         # Taken from
         # # https://github.com/keras-team/keras-cv/blob/ecfafd9ea7fe9771465903f5c1a03ceb17e333f1/keras_cv/models/stable_diffusion/stable_diffusion.py#L481
@@ -110,13 +114,15 @@ class Trainer(tf.keras.Model):
         args = tf.convert_to_tensor([timestep], dtype=tf.float32) * freqs
         embedding = tf.concat([tf.math.cos(args), tf.math.sin(args)], 0)
         embedding = tf.reshape(embedding, [1, -1])
-        return embedding  # Excluding the repeat.
+        return embedding 
 
+    # 최적화 단계에서 decay 계산, ema일 때 사용
     def get_decay(self, optimization_step):
         value = (1 + optimization_step) / (10 + optimization_step)
         value = tf.cast(value, dtype=self.ema.dtype)
         return 1 - tf.math.minimum(self.ema, value)
 
+    # ema 적용 시 가중치 업데이트 코드
     def ema_step(self):
         self.optimization_step.assign_add(1)
         self.ema.assign(self.get_decay(self.optimization_step))
@@ -128,6 +134,7 @@ class Trainer(tf.keras.Model):
             tmp = self.ema * (ema_weight - weight)
             ema_weight.assign_sub(tmp)
 
+    # 인코더의 출력값으로부터 샘플을 생성, 정규분포로부터 랜덤한 샘플 추출
     def sample_from_encoder_outputs(self, outputs):
         mean, logvar = tf.split(outputs, 2, axis=-1)
         logvar = tf.clip_by_value(logvar, -30.0, 20.0)
@@ -136,7 +143,7 @@ class Trainer(tf.keras.Model):
         return mean + std * sample
 
     def save_weights(self, filepath, overwrite=True, save_format=None, options=None):
-        # Overriding to help with the `ModelCheckpoint` callback.
+        # ema > 0 일 경우
         if self.do_ema:
             self.ema_diffusion_model.save_weights(
                 filepath=filepath,
@@ -144,6 +151,7 @@ class Trainer(tf.keras.Model):
                 save_format=save_format,
                 options=options,
             )
+        # ema > 0 이 아닐 경우
         else:
             self.diffusion_model.save_weights(
                 filepath=filepath,
