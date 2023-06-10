@@ -33,7 +33,7 @@ from datasets import DatasetUtils
 from trainer import Trainer
 
 MAX_PROMPT_LENGTH = 77
-CKPT_PREFIX = "ckpt"
+CKPT_PREFIX = "/content/drive/MyDrive/HHT/pokemon_stable_diffusion/weights/ckpt"
 
 
 def parse_args():
